@@ -119,15 +119,15 @@ DirectorioTlmp    = "E:\TLMP"
 NumeroDeCopias    = 4
 lEnviarEmail      = SI
 
-cParaEmail        = "josemoron@fontia.es,scuesta@eurotronic.es"
-cAsunto           = "FONTIA: Copia Tlmplus finalizada" 
+cParaEmail        = "destino@eurotronic.es"
+cAsunto           = "ORIGEN: Copia Tlmplus finalizada" 
 
 cDeEmail          = "Copia bases Tlmplus <sos@eurotronic.es>"
 cServidor         = "smtp.eurotronic.es"
 lHttp             = SI
 cPuerto           = 587
 cUsuario          = "sos@eurotronic.es"
-cPassword         = "Ayuda000"
+cPassword         = "*********"
 lAutentificacion  = SI
 lSSL              = NO
 
