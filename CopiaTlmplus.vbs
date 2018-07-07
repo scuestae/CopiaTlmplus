@@ -1,5 +1,5 @@
 '--------------------------------------------------------------------------
-' Eurotronic 2017 - CopiaTlmplus.vbs - ver. 4.3
+' Eurotronic 2017 - CopiaTlmplus.vbs - ver. 4.7
 ' -------------------------------------------------------------------------
 ' vbscript para copiar las bases Tlmplus a un directorio
 ' sintaxis:
@@ -15,22 +15,28 @@
 '--------------------------------------------------------------------------
 ' Actualizaciones
 '----------------
-' Se hace un backup de las bases en lugar de copiar sus ficheros
-' Se cambia la copia de archivos por el comando ROBOCOPY
-' Por tanto no se borra el directorio destino, sino que se actuliza el existente
+' Se hace un backup de Progress de las bases en lugar de copiar sus ficheros
+' Se cambia la copia de archivos por el comando ROBOCOPY,  por tanto
+' no se borra el directorio destino, sino que se actualiza el existente
 ' Se controla que la base de datos no tenga activado el AI
 ' Se revisan los mensajes del log de la copia
 ' Se copian los ficheros <bdatos>.lg por si hubiera que revisarlo
+' Se permite enviar el cuerpo del email en formato html
+' Se habilita la codificación Unicode en la script y en el email
+' Se controla que la base de datos esté parada 
+' Se añade tarea de cálculo de costes
+' Se añada copia adicional en carpeta "\N"
+'
 ' --------------
 ' Funcionamiento
 ' --------------
 ' Dentro del DirectorioDestino de copia se crean tantas carpetas como indique la 
-' variable NumeroCopias. El nombre de estas carpetas es un nUmero:
+' variable NumeroCopias. El nombre de estas carpetas es un número:
 ' 1, 2, 3, etc.
-' cada carpeta contiene una copia, por ejemplo de cada dIa, cuando se completan 
+' cada carpeta contiene una copia, por ejemplo de cada día, cuando se completan 
 ' todas las copias se sobrescribe la carpeta 1.
-' TambiEn se crea un fichero de control con el nombre de la copia  
-' seguido del numero de la copia realizada. Cuando el fichero de control no existe, 
+' También se crea un fichero de control con el nombre de la copia  
+' seguido del número de la copia realizada. Cuando el fichero de control no existe, 
 ' por ejemplo la primera vez, se copia sobre la carpeta 1.
 ' CarpetaDestino\
 '               \1
@@ -42,7 +48,8 @@
 '               \2\GesDoc
 '               \2\Formularios
 '               \Copia_2
-' La carpeta Bases contiene un fichero los ficheros necesarios para una restauracion
+'               \N (opcional, copia para cloudbackup)
+' La carpeta Bases contiene un fichero los ficheros necesarios para una restauración
 ' *.bck  : fichero backup de la base de datos
 ' *.st   : fichero con la estructura de volumnes de la bdatos
 ' *.a?   : fichero AI con las transacciones despues del backup
@@ -50,25 +57,25 @@
 ' ----------------
 ' Puesta en marcha
 ' ----------------
-' - Copiar este archivo en una carpeta, por ejemplo la de instalaciOn de Tlmplus
+' - Copiar este archivo en una carpeta, por ejemplo la de instalación de Tlmplus
 ' - Editarlo y modificar los valores de las variables requeridas para la copia.
-'   Estas van a depender de cada instalacion. Las mas importantes son:
+'   Estas van a depender de cada instalación. Las mas importantes son:
 '   DirectoriosOrigen : contiene todas las carpetas que se van a incluir en la copia
 '   BasesDeDatos      : contiene las bases de datos que se van copiar por PROBACKUP
 '   DirectorioTlmp    : contiene la unidad y la carpeta donde estA instalado Tlmplus
 ' -----------
-' Ejecucion
+' Ejecución
 ' -----------
-' Lo mas practico es crear una tarea programada que se ejecute todos los dIas a 
+' Lo mas práctico es crear una tarea programada que se ejecute todos los días a 
 ' una hora en la que no haya ningun usuario trabajando, ya que la script realiza
 ' la parada, truncado y borrado de los ficheros temporales. 
 ' El siguiente ejemplo ejecuta la script situada en la carpeta C:\Tlmp y copia 
-' las carpetas especificadas en la variable DirectoriosOrigen y las copia en la
+' las carpetas especificadas en la variable DirectoriosOrigen y en la 
 ' carpeta G:\Copias
 ' 
 ' cscript C:\Tlmp\CopiaTlmplus.vbs G:\CopiaTlmplus
 ' -------------
-' RECUPERACION
+' RECUPERACIÓN
 ' -------------
 ' si no existe la base de datos copiar la estructura
 ' COPY bak\tlmplus.st bases
@@ -91,12 +98,12 @@
 '
 OPTION EXPLICIT
 
-DIM DirectoriosOrigen, BasesDeDatos, DirectorioTlmp, NumeroDeCopias, cFicheroControlOld
-DIM fs, nt, lEnViarEmail, ret, lHttp, lAutentificacion, lSSL, cFicheroControlNew 
-DIM cServidor, cParaEmail, cDeEmail, cAsunto, cMensaje, cAdjunto, FicheroLog 
-DIM cPuerto, cPassword, cUsuario, FicheroControl, lNuevoLOG, nErrores, FicheroLogRC
+DIM DirectoriosOrigen, BasesDeDatos, DirectorioTlmp, NumeroDeCopias, cFicheroControlOld, fs, nt
+DIM lEnViarEmail, ret, lHtml, lAutentificacion, lSSL, cFicheroControlNew, lCopiaEnCarpetaN 
+DIM cServidor, cParaEmail, cDeEmail, cAsunto, cMensaje, cAdjunto, FicheroLog, lRecalculosTLMPLUS
+DIM cPuerto, cPassword, cUsuario, FicheroControl, lNuevoLOG, nErrores, FicheroLogRC, DirectorioCarpetaN
 
-CONST COPYRIGTH = "(C) Eurotronic ver. 4.3"
+CONST COPYRIGTH = "(C) Eurotronic ver. 4.7"
 CONST SI = TRUE
 CONST NO = FALSE
 CONST TIEMPOESPERA = 6000
@@ -112,36 +119,38 @@ CONST OPCIONESR = " /COPY:DT /MIR /IT /NP /NFL /R:10 /W:1"
 ' Nota: NO PONER LOS CARACTERES \ NI * AL FINAL, SALVO EN EN CASO 3)
 '--------------------------------------------------------------------------
 
-DirectoriosOrigen = ARRAY( "E:\TLMP\GESDOC", "E:\TLMP\FORMULARIOS" )
-BasesDeDatos      = ARRAY( "tlmplus", "tlmplus1", "tlmplus2", "tlmp-web" )
+DirectoriosOrigen  = ARRAY( "E:\TLMP\GESDOC", "E:\TLMP\FORMULARIOS" )
+BasesDeDatos       = ARRAY( "tlmplus", "tlmplus1", "tlmplus2" ) ', "tlmp-web" )
 
-DirectorioTlmp    = "E:\TLMP"
-NumeroDeCopias    = 4
-lEnviarEmail      = SI
+DirectorioTlmp     = "C:\TLMP" 
+NumeroDeCopias     = 4
+lCopiaEnCarpetaN   = SI 
+lEnviarEmail       = SI
+lRecalculosTLMPLUS = SI 
 
-cParaEmail        = "destino@eurotronic.es"
-cAsunto           = "ORIGEN: Copia Tlmplus finalizada" 
+cParaEmail         = "destino@eurotronic.es" 
+cAsunto            = "BASEDATOS: Copia Tlmplus finalizada" 
 
-cDeEmail          = "Copia bases Tlmplus <sos@eurotronic.es>"
-cServidor         = "smtp.eurotronic.es"
-lHttp             = SI
-cPuerto           = 587
-cUsuario          = "sos@eurotronic.es"
-cPassword         = "*********"
-lAutentificacion  = SI
-lSSL              = NO
+cDeEmail           = "Copia bases Tlmplus <sos@eurotronic.es>"
+cServidor          = "smtp.eurotronic.es"
+lHtml              = SI
+cPuerto            = 587
+cUsuario           = "sos@eurotronic.es"
+cPassword          = "********"
+lAutentificacion   = SI
+lSSL               = NO
 
-lNuevoLOG         = SI
-FicheroLog        = ".\" & LEFT(WScript.ScriptName, INSTRREV(WScript.ScriptName,".")-1) & ".log" 
-FicheroControl    = "Copia_"
-FicheroLogRC      = "Copia_LOG.txt"
+lNuevoLOG          = SI
+FicheroLog         = ".\" & LEFT(WScript.ScriptName, INSTRREV(WScript.ScriptName,".")-1) & ".log" 
+FicheroControl     = "Copia_"
+FicheroLogRC       = "Copia_LOG.txt"
 
 '--------------------------------------------------------------------------
 Main()
 '--------------------------------------------------------------------------
 
 '--------------------------------------------------------------------------
-' Inicio de la ejecucion
+' Inicio de la ejecución
 '--------------------------------------------------------------------------
 SUB Main()
 
@@ -151,7 +160,7 @@ SUB Main()
     SET fs = Wscript.CREATEOBJECT("Scripting.FileSystemObject")
     SET nt = WScript.CREATEOBJECT("WScript.Network")
 
-    ' cOdigo de salida de la script
+    ' código de salida de la script
     nSalida = 1
     ' contar los errores no criticos
     nErrores = 0 
@@ -164,11 +173,12 @@ SUB Main()
     ELSE
         WScript.Echo COPYRIGTH & vbCrLF &  "Sintaxis: cscript " & WScript.ScriptName & " <DirectorioDestino> "
         wscript.Quit(nSalida)
-    END IF    
+    END IF
+    
     ' -----------------------------
     ' PREPARAR DESTINO DE COPIA
     ' -----------------------------
-    ' --- Reiniciar el LOG en cada ejecucion
+    ' --- Reiniciar el LOG en cada ejecución
     IF lNuevoLOG THEN
     	CrearLog
     END IF
@@ -189,6 +199,7 @@ SUB Main()
     
     DirectorioNCopia = DestinoDirectorio & "\" & nCopia
     DirectorioNCopiaAnterior = DestinoDirectorio & "\" & nCopiaAnterior
+    DirectorioCarpetaN = DestinoDirectorio & "\N" 
 
     DirectorioNbases = DirectorioNCopia & "\bases"
     DirectorioNbasesAnterior = DirectorioNCopiaAnterior & "\bases"
@@ -236,7 +247,7 @@ SUB Main()
         nReturn = BackupBaseDatos( BasesDeDatos(I), DirectorioNbases, DirectorioNbasesAnterior )
         IF nReturn <> 0 THEN 
             nErrores = nErrores + 1
-            WriteLog F2( "ERROR en BackupBaseDatos(): {0}, codigo de salida: {1}", BasesDeDatos(I), nReturn )
+            WriteLog F2( "ERROR en BackupBaseDatos(): {0}, código de salida: {1}", BasesDeDatos(I), nReturn )
         END IF
         WriteLog "------------------------------"
     NEXT 
@@ -247,9 +258,9 @@ SUB Main()
     ' --- Iniciar Bases de datos
     AccionBases "start"
 
-    ' -----------------------------
-    ' COPIAR CARPETAS 
-    ' -----------------------------
+    ' ----------------------------------------
+    ' COPIAR CARPETAS: GESDOC, FORMULARIOS, N 
+    ' ----------------------------------------
     IF CopiaCarpetas(DestinoDirectorio, DirectorioNCopia) THEN
         WriteLog "Copia realizada correctamente. "
         nSalida = 0
@@ -267,13 +278,16 @@ SUB Main()
     END IF
 
     ' -----------------------------
-    ' RECALCULOS DIARIOS TLMPLUS
+    ' RECÁLCULOS DIARIOS TLMPLUS
     ' -----------------------------
-    RecalculoTlmplus
+    If lRecalculosTLMPLUS Then 
+        RecalculoTlmplus
+    End if
 
     Salir nSalida, DestinoDirectorio & "\" & FicheroLogRC
 
 END SUB
+
 ' -------------------------------------------------------------------------
 ' Backup base-datos a-carpeta-destino
 '--------------------------------------------------------------------------
@@ -284,7 +298,7 @@ FUNCTION BackupBaseDatos( BaseDatos, DirectorioDestino, DirectorioDestinoAnterio
     BackupBaseDatos = 0
 
     ' --- comprobar que la bdatos esta parada
-    nReturn = oShell.Run( F2("{0}\dlc\bin\_proutil {0}\bases\{1} -C busy", DirectorioTlmp, BaseDatos) )
+    nReturn = oShell.Run( F2("{0}\dlc\bin\_proutil {0}\bases\{1} -C busy", DirectorioTlmp, BaseDatos), 0, TRUE )
     IF nReturn <> 0 THEN
         WriteLog F1( "ERROR: La base de datos {0} no esta parada.", BaseDatos )   
         BackupBaseDatos = 9
@@ -294,20 +308,20 @@ FUNCTION BackupBaseDatos( BaseDatos, DirectorioDestino, DirectorioDestinoAnterio
     ' --- saber el AI esta activado y copiar si uno de los 3 AI esta lleno
     nReturn = CopiarVaciarAILleno( BaseDatos, DirectorioDestinoAnterior )
     IF nReturn = 0 THEN ' la bdatos SI tiene activado el AI
-        ' --- comprobar que hay un AI vacio
+        ' --- comprobar que hay un AI vacío
         IF NOT ResultadoEjecucion( F2("CMD.EXE /C {0}\dlc\bin\_rfutil {0}\bases\{1} -C aimage extent list", DirectorioTlmp, BaseDatos), "Vacia") THEN
-            WriteLog F1( "ERROR: La base de datos {0} no tiene un AI vacio.", BaseDatos )
+            WriteLog F1( "ERROR: La base de datos {0} no tiene un AI vacío.", BaseDatos )
             BackupBaseDatos = 7   
             EXIT FUNCTION
         END IF 
     END IF
 
     ' --- realizar el backup
-    WriteLog F3("Realizar backup : {0}\dlc\bin\probkup {0}\bases\{1} {2}\{1}.bck", DirectorioTlmp, BaseDatos, DirectorioDestino)
-    nReturn = oShell.Run( F3("{0}\dlc\bin\probkup {0}\bases\{1} {2}\{1}.bck", DirectorioTlmp, BaseDatos, DirectorioDestino), 0, TRUE )
+    WriteLog F3("Realizar backup : {0}\dlc\bin\probkup {0}\bases\{1} {2}\{1}.bck -verbose", DirectorioTlmp, BaseDatos, DirectorioDestino)
+    nReturn = oShell.Run( F3("{0}\dlc\bin\probkup {0}\bases\{1} {2}\{1}.bck -verbose", DirectorioTlmp, BaseDatos, DirectorioDestino), 0, TRUE )
     IF nReturn <> 0 THEN
         WriteLog F3("{0}\dlc\bin\probkup {0}\bases\{1} {2}\{1}.bck", DirectorioTlmp, BaseDatos, DirectorioDestino)
-        WriteLog "ERROR: Realizando el backup, codigo de salida: " & nReturn
+        WriteLog "ERROR: Realizando el backup, código de salida: " & nReturn
         BackupBaseDatos = 5
         EXIT FUNCTION
     END IF
@@ -317,7 +331,7 @@ FUNCTION BackupBaseDatos( BaseDatos, DirectorioDestino, DirectorioDestinoAnterio
     nReturn = oShell.Run( F3("{0}\dlc\bin\prorest {0}\bases\{1} {2}\{1}.bck -vf", DirectorioTlmp, BaseDatos, DirectorioDestino), 0, TRUE )
     IF nReturn <> 0 THEN
         WriteLog F3("{0}\dlc\bin\prorest {0}\bases\{1} {2}\{1}.bck -vf", DirectorioTlmp, BaseDatos, DirectorioDestino)
-        WriteLog "ERROR: Verificando el backup, codigo de salida: " & nReturn
+        WriteLog "ERROR: Verificando el backup, código de salida: " & nReturn
         BackupBaseDatos = 3
     END IF
 
@@ -325,7 +339,7 @@ FUNCTION BackupBaseDatos( BaseDatos, DirectorioDestino, DirectorioDestinoAnterio
     nReturn = oShell.Run( F3("{0}\dlc\bin\_dbutil prostrct list {0}\bases\{1} {2}\{1}.st", DirectorioTlmp, BaseDatos, DirectorioDestino), 0, TRUE )
     IF nReturn <> 0 THEN
         WriteLog F3("{0}\dlc\bin\_dbutil prostrct list {0}\bases\{1} {2}\{1}.st", DirectorioTlmp, BaseDatos, DirectorioDestino)
-        WriteLog "ERROR: Copiando estructura, codigo de salida: " & nReturn
+        WriteLog "ERROR: Copiando estructura, código de salida: " & nReturn
         BackupBaseDatos = 2
     END IF 
 
@@ -342,6 +356,7 @@ FUNCTION BackupBaseDatos( BaseDatos, DirectorioDestino, DirectorioDestinoAnterio
 
     SET oShell = Nothing
 END FUNCTION
+
 '--------------------------------------------------------------------------
 ' Crear la carpeta destino
 '--------------------------------------------------------------------------
@@ -366,12 +381,23 @@ FUNCTION CrearCarpetaDestino(carpeta)
         WriteLog F1("Directorio creado: {0}", carpeta)
         ' si hubo error en el paso anterior
         IF ERR.number <>0 THEN
-            CALL NERROR("Error al crear el directorio destino {0}", DestinoDirectorio)	
+            CALL NERROR("Error al crear el directorio destino {0}", carpeta)	
             SET oShell = Nothing
             EXIT FUNCTION
 		END IF
     END IF
-
+    
+    ' comprobar si existe la carpeta destino N
+    IF lCopiaEnCarpetaN AND Not fs.FolderExists(DirectorioCarpetaN) THEN
+        fs.CreateFolder(DirectorioCarpetaN)
+        WriteLog F1("Directorio creado: {0}", DirectorioCarpetaN)
+        ' si hubo error en el paso anterior
+        IF ERR.number <>0 THEN
+            CALL NERROR("Error al crear el directorio destino {0}", DirectorioCarpetaN)	
+            SET oShell = Nothing
+            EXIT FUNCTION
+		END IF
+    END IF
     CrearCarpetaDestino = TRUE
     SET oShell = Nothing
 
@@ -402,7 +428,7 @@ FUNCTION ResultadoEjecucion(cComando, cBuscar)
     Do
         strFromProc = ObjExec.StdOut.ReadLine()
         WriteLog strFromProc
-        ' si cBuscar es vacio devolver en ella el resultado
+        ' si cBuscar es vacío devolver en ella el resultado
         IF cTipo = "_DEVOLVER_" AND cBuscar = "" THEN 
             cBuscar = strFromProc
         END IF
@@ -416,6 +442,7 @@ FUNCTION ResultadoEjecucion(cComando, cBuscar)
     SET objShell= Nothing
     SET ObjExec = Nothing
 END FUNCTION
+
 '--------------------------------------------------------------------------
 '  Comprueba AI lleno, lo copia Y lo vacia
 '--------------------------------------------------------------------------
@@ -452,7 +479,7 @@ FUNCTION CopiarVaciarAILleno( BaseDatos, DirectorioDestinoAnterior )
             END IF
         ELSE 
             ' saber si esta activado el AI en la base de datos
-            WriteLog "Fichero no encontrado: " & cFicheroLleno
+            ' WriteLog "Fichero no encontrado: " & cFicheroLleno
         END IF
     ELSE ' 2
         CopiarVaciarAILleno = 1
@@ -499,8 +526,7 @@ FUNCTION CopiaCarpetas(DestinoDirectorio, DirectorioNCopia)
 		        ' determinar la carpeta destino segun el origen
 				Carpeta=MID(DirectoriosOrigen(i), INSTRREV(DirectoriosOrigen(i),"\")+1)
 		        ' en este caso aNadir todo, si no da error
-		        CopiarOrigen = DirectoriosOrigen(i) '& "\*" 
-		        
+		        CopiarOrigen = DirectoriosOrigen(i) '& "\*" 		        
 
 		' --- 2) el origen es una carpeta. Ej. C:\TLMPLUS\BASES 
 		ELSEIF fs.FolderExists( DirectoriosOrigen(i) ) THEN
@@ -534,18 +560,31 @@ FUNCTION CopiaCarpetas(DestinoDirectorio, DirectorioNCopia)
 
         ' -- comando ROBOCOPY --
         cRoboCopy = "ROBOCOPY " & CarpetaOrigen & " " & _ 
-            DirectorioNCopia & "\" & Carpeta  & " " & _ 
-            FicherosOrigen & _ 
-            OPCIONESR & _ 
-            " /UNILOG" & A & DestinoDirectorio & "\" & FicheroLogRC
+                        DirectorioNCopia & "\" & Carpeta  & " " & _ 
+                        FicherosOrigen & _ 
+                        OPCIONESR & _ 
+                        " /UNILOG" & A & DestinoDirectorio & "\" & FicheroLogRC
 
         WriteLog F1("{0}", cRoboCopy  )
   
         nReturn = oShell.Run( cRoboCopy , 0, true )
 
-        WriteLog F2("Codigo del resultado: {0} = {1}", nReturn, ResultadoRC(nReturn))
+        WriteLog F2("código del resultado: {0} = {1}", nReturn, ResultadoRC(nReturn))
         
     NEXT
+    ' realizar copia en carpeta N para cloud backup.
+    ' se copia la última copia \CopiaTlmplus\x sobre la \CopiaTlmplus\N
+    IF lCopiaEnCarpetaN THEN 
+        WriteLog "Copia adicional para sincronizar en la nube"
+        cRoboCopy = "ROBOCOPY " & DirectorioNCopia & " " & _ 
+            DirectorioCarpetaN & " " & _ 
+            FicherosOrigen & _ 
+            OPCIONESR & _ 
+            " /UNILOG" & A & DestinoDirectorio & "\" & FicheroLogRC
+        WriteLog F1( "{0}", cRoboCopy  ) 
+        nReturn = oShell.Run( cRoboCopy , 0, true ) 
+        WriteLog F2("código del resultado: {0} = {1}", nReturn, ResultadoRC(nReturn))
+    END IF
 
     ' si hay errores salir de la funcion 
     IF nErrores = 0 THEN 
@@ -555,6 +594,7 @@ FUNCTION CopiaCarpetas(DestinoDirectorio, DirectorioNCopia)
     SET oShell = Nothing
 
 END FUNCTION
+
 '--------------------------------------------------------------------------
 '  actualizar el fichero de control
 '--------------------------------------------------------------------------
@@ -573,6 +613,7 @@ SUB ActualizarFicheroControl()
 		nErrores = nErrores  + 1
     END IF
 END SUB
+
 '--------------------------------------------------------------------------
 '  crear un directorio o carpeta
 '--------------------------------------------------------------------------
@@ -610,11 +651,11 @@ SUB BorrarTMP()
    WriteLog "Borrar ficheros temporales: " & "\TMP\*.*;" &  "\PROTRACE.*;" & "\DBI*;" &  "\SRT*" 
       
    on error resume Next
-   fs.DeleteFile DirectorioTlmp & "\TMP\*.*",TRUE
-   fs.DeleteFile DirectorioTlmp & "\PROTRACE.*",TRUE
-   fs.DeleteFile DirectorioTlmp & "\DBI?????",TRUE
-   fs.DeleteFile DirectorioTlmp & "\LBI?????",TRUE
-   fs.DeleteFile DirectorioTlmp & "\SRT?????",TRUE
+   fs.DeleteFile DirectorioTlmp & "\TMP\*.*", TRUE
+   fs.DeleteFile DirectorioTlmp & "\PROTRACE.*", TRUE
+   fs.DeleteFile DirectorioTlmp & "\DBI*", TRUE
+   fs.DeleteFile DirectorioTlmp & "\LBI*", TRUE
+   fs.DeleteFile DirectorioTlmp & "\SRT*", TRUE
    on error goto 0
 
    SET oShell = Nothing
@@ -637,46 +678,50 @@ SUB AccionBases(cAccion)
 
    WriteLog UCASE(cAccion) & " bases de datos"
    
-   ' -- parar bases y procesos
-   If cAccion="stop" THEN
-	   ' parar apps server
-	   WriteLog "... parar apps server"
-	   oShell.run DirectorioTlmp &"\dlc\bin\asbman -name tlmp-web -kill", 0
-	   oShell.run DirectorioTlmp &"\dlc\bin\asbman -name ZSSINBBDD -kill", 0
-	   oShell.run DirectorioTlmp &"\dlc\bin\asbman -name ZSTlmp1 -kill", 0
-	   oShell.run DirectorioTlmp &"\dlc\bin\asbman -name ZSTlmp12 -kill", 0
-	   oShell.run DirectorioTlmp &"\dlc\bin\asbman -name ZSTlmp2 -kill", 0, True
+    ' -- parar bases y procesos
+    If cAccion="stop" THEN
+        ' parar apps server
+        WriteLog "... parar apps server"
+        oShell.run DirectorioTlmp &"\dlc\bin\asbman -name tlmp-web -kill", 0
+        oShell.run DirectorioTlmp &"\dlc\bin\asbman -name App-Sat -kill", 0
+        oShell.run DirectorioTlmp &"\dlc\bin\asbman -name ZSSINBBDD -kill", 0
+        oShell.run DirectorioTlmp &"\dlc\bin\asbman -name ZSTlmp1 -kill", 0
+        oShell.run DirectorioTlmp &"\dlc\bin\asbman -name ZSTlmp12 -kill", 0
+        oShell.run DirectorioTlmp &"\dlc\bin\asbman -name ZSTlmp2 -kill", 0, True
 
-	   oShell.run DirectorioTlmp &"\dlc\bin\dbman -" & cAccion & " -db tlmplus", 0
-   	   oShell.run DirectorioTlmp &"\dlc\bin\dbman -" & cAccion & " -db tlmplus1", 0
-	   oShell.run DirectorioTlmp &"\dlc\bin\dbman -" & cAccion & " -db tlmplus2", 0
-	   oShell.run DirectorioTlmp &"\dlc\bin\dbman -" & cAccion & " -db tlmp-web", 0
-	   oShell.run DirectorioTlmp &"\dlc\bin\dbman -" & cAccion & " -db tlmbd-c", 0
-	   oShell.run DirectorioTlmp &"\dlc\bin\dbman -" & cAccion & " -db tlmbd-d", 0, True
+        oShell.run DirectorioTlmp &"\dlc\bin\dbman -" & cAccion & " -db tlmplus", 0
+        oShell.run DirectorioTlmp &"\dlc\bin\dbman -" & cAccion & " -db tlmplus1", 0
+        oShell.run DirectorioTlmp &"\dlc\bin\dbman -" & cAccion & " -db tlmplus2", 0
+        oShell.run DirectorioTlmp &"\dlc\bin\dbman -" & cAccion & " -db tlmp-web", 0
+        oShell.run DirectorioTlmp &"\dlc\bin\dbman -" & cAccion & " -db tlmp-gmao", 0
+        oShell.run DirectorioTlmp &"\dlc\bin\dbman -" & cAccion & " -db tlmbd-c", 0
+        oShell.run DirectorioTlmp &"\dlc\bin\dbman -" & cAccion & " -db tlmbd-d", 0, True
 
-	   ' eliminar procesos java.exe
-	   'WriteLog "... eliminar procesos java.exe"
-	   'oShell.run "taskkill.exe /F /IM java.exe", 0, True
-   End If
-   
-   ' -- arrancar bases y procesos  
-   If cAccion="start" THEN
-	   
-	   oShell.run DirectorioTlmp &"\dlc\bin\dbman -" & cAccion & " -db tlmplus", 0
-       oShell.run DirectorioTlmp &"\dlc\bin\dbman -" & cAccion & " -db tlmplus1", 0
-   	   oShell.run DirectorioTlmp &"\dlc\bin\dbman -" & cAccion & " -db tlmplus2", 0
-	   oShell.run DirectorioTlmp &"\dlc\bin\dbman -" & cAccion & " -db tlmp-web", 0
-   	   oShell.run DirectorioTlmp &"\dlc\bin\dbman -" & cAccion & " -db tlmbd-c", 0
-   	   oShell.run DirectorioTlmp &"\dlc\bin\dbman -" & cAccion & " -db tlmbd-d", 0, True
+        ' eliminar procesos java.exe
+        'WriteLog "... eliminar procesos java.exe"
+        'oShell.run "taskkill.exe /F /IM java.exe", 0, True
+    End If
 
-	   ' arrancar apps server
-	   WriteLog "... arrancar apps server"
-	   oShell.run DirectorioTlmp &"\dlc\bin\asbman -name tlmp-web -start", 0
-	   oShell.run DirectorioTlmp &"\dlc\bin\asbman -name ZSSINBBDD -start", 0
-	   oShell.run DirectorioTlmp &"\dlc\bin\asbman -name ZSTlmp1 -start", 0
-	   oShell.run DirectorioTlmp &"\dlc\bin\asbman -name ZSTlmp12 -start", 0
-	   oShell.run DirectorioTlmp &"\dlc\bin\asbman -name ZSTlmp2 -start", 0, True
-   End If
+    ' -- arrancar bases y procesos  
+    If cAccion="start" THEN
+
+        oShell.run DirectorioTlmp &"\dlc\bin\dbman -" & cAccion & " -db tlmplus", 0
+        oShell.run DirectorioTlmp &"\dlc\bin\dbman -" & cAccion & " -db tlmplus1", 0
+        oShell.run DirectorioTlmp &"\dlc\bin\dbman -" & cAccion & " -db tlmplus2", 0
+        oShell.run DirectorioTlmp &"\dlc\bin\dbman -" & cAccion & " -db tlmp-web", 0
+        oShell.run DirectorioTlmp &"\dlc\bin\dbman -" & cAccion & " -db tlmp-gmao", 0
+        oShell.run DirectorioTlmp &"\dlc\bin\dbman -" & cAccion & " -db tlmbd-c", 0
+        oShell.run DirectorioTlmp &"\dlc\bin\dbman -" & cAccion & " -db tlmbd-d", 0, True
+
+        ' arrancar apps server
+        WriteLog "... arrancar apps server"
+        oShell.run DirectorioTlmp &"\dlc\bin\asbman -name tlmp-web -start", 0
+        oShell.run DirectorioTlmp &"\dlc\bin\asbman -name App-Sat -start", 0
+        oShell.run DirectorioTlmp &"\dlc\bin\asbman -name ZSSINBBDD -start", 0
+        oShell.run DirectorioTlmp &"\dlc\bin\asbman -name ZSTlmp1 -start", 0
+        oShell.run DirectorioTlmp &"\dlc\bin\asbman -name ZSTlmp12 -start", 0
+        oShell.run DirectorioTlmp &"\dlc\bin\asbman -name ZSTlmp2 -start", 0, True
+    End If
 
    SET oShell = Nothing
    SET oEntornoUsuario =  Nothing
@@ -686,23 +731,23 @@ SUB AccionBases(cAccion)
 END SUB
 
 '--------------------------------------------------------------------------
-' Recalculo en Tlmplus
+' Recálculo en Tlmplus
 '--------------------------------------------------------------------------
 SUB RecalculoTlmplus()
 	DIM oShell, nReturn, c, i, aProceso, aTexto
 	SET oShell = WScript.CREATEOBJECT("Wscript.Shell")
-	
-	c = DirectorioTlmp & "\dlc\bin\prowin32.exe -p " & DirectorioTlmp & "\prog\? -ininame " & DirectorioTlmp & "\tlmp.ini -Wa -wpp"
+
+    aProceso = Array ( "p10tar90000-640.r",    "p10tar90000-650.r",               "p10tar90000-540.r", "ptarfictmp010.r",   "p10tar01903-020.r" )
+	aTexto   = Array ( "Pendiente de recibir", "Pendiente de servir y reservado", "Stock en tránsito", "Tablas temporales", "Reconstrucción de costes" ) 
+
+	WriteLog "Inicio recálculos en la base de datos: " & DATE & " " & TIME
+    For i=0 To UBound(aProceso)
+
+        nReturn = oShell.Run( F2( "{0}\dlc\bin\prowin32.exe -p {0}\prog\{1} -ininame {0}\tlmp.ini -Wa -wpp", DirectorioTlmp,  aProceso(i) ), 0, true )
+        WriteLog F3(" {0} {1} código del resultado: {2}.", aTexto(i) & SPACE(35-LEN( aTexto(i))), TIME, nReturn)
     
-    aProceso = Array ( "p10tar90000-640.r",    "p10tar90000-650.r",               "p10tar90000-540.r", "ptarfictmp010.r" )
-	aTexto   = Array ( "Pendiente de recibir", "Pendiente de servir y reservado", "Stock en transito", "Tablas temporales" ) 
-		
-	WriteLog "Inicio recalculos en la base de datos: " & DATE & " " & TIME
-	For i=0 To UBound(aProceso)
-		nReturn = oShell.Run( Replace(c, "?", aProceso(i)), 1, true )
-		WriteLog " Recalculo en la BD: " & aTexto(i) & ". Codigo del resultado: " & nReturn
-	Next 
-	WriteLog "Fin recalculos en la base de datos: " & DATE & " " & TIME
+    Next 
+	WriteLog "Fin recálculos en la base de datos: " & DATE & " " & TIME
 End SUB
 
 '--------------------------------------------------------------------------
@@ -724,6 +769,7 @@ SUB TruncarBi()
    oShell.run DirectorioTlmp & "\dlc\bin\proutil " & DirectorioTlmp  & "\bases\tlmbd-c  -C truncate bi", 0
    oShell.run DirectorioTlmp & "\dlc\bin\proutil " & DirectorioTlmp  & "\bases\tlmbd-d  -C truncate bi", 0
    oShell.run DirectorioTlmp & "\dlc\bin\proutil " & DirectorioTlmp  & "\bases\tlmp-web -C truncate bi", 0
+   oShell.run DirectorioTlmp & "\dlc\bin\proutil " & DirectorioTlmp  & "\bases\tlmp-gmao -C truncate bi", 0
 
    SET oShell = Nothing
    SET oEntornoUsuario =  Nothing
@@ -750,7 +796,8 @@ SUB TruncarLg()
    oShell.run DirectorioTlmp & "\dlc\bin\_dbutil prolog " & DirectorioTlmp  & "\bases\tlmbd-c", 0
    oShell.run DirectorioTlmp & "\dlc\bin\_dbutil prolog " & DirectorioTlmp  & "\bases\tlmbd-d", 0
    oShell.run DirectorioTlmp & "\dlc\bin\_dbutil prolog " & DirectorioTlmp  & "\bases\tlmp-web", 0
-      
+   oShell.run DirectorioTlmp & "\dlc\bin\_dbutil prolog " & DirectorioTlmp  & "\bases\tlmp-gmao", 0
+
    SET oShell = Nothing
    SET oEntornoUsuario =  Nothing
    WScript.Sleep(TIEMPOESPERA)
@@ -758,7 +805,7 @@ SUB TruncarLg()
 END SUB
 
 '--------------------------------------------------------------------------
-'  codigos de retorno de ROBOCOPY
+'  códigos de retorno de ROBOCOPY
 '--------------------------------------------------------------------------
 FUNCTION ResultadoRC(nReturn)
     ' if errorlevel 16 echo ***FATAL ERROR*** & goto end
@@ -806,6 +853,9 @@ SUB Salir(nSalida, cFicheroAdjunto)
 	    
         cAdjunto = cFicheroAdjunto
         cMensaje = cMensaje
+        ' ini - convertir en html
+        cMensaje = Replace("<meta http-equiv='Content-Type' content='text/html; charset=utf-8'><pre style='white-space:pre-wrap'>", "'", CHR(34)) & cMensaje & "</pre>"
+        ' fin - convertir en hmtl
         cAsunto  = cAsunto & c
         
         ret = FALSE
@@ -814,7 +864,7 @@ SUB Salir(nSalida, cFicheroAdjunto)
             cDeEmail, _
             cAsunto, _
             cMensaje, _
-            lHttp, _
+            lHtml, _
             cAdjunto, _
             cPuerto, _
             cUsuario, _
@@ -872,8 +922,8 @@ FUNCTION WMIJobCompleted(outParam)
     WEND
 
     IF (jobState <> JobCompleted) THEN
-        WriteLog F1("Codigo de Error:{0}", WMIJob.ErrorCode)
-        WriteLog F1("Descripcion del Error:{0}", WMIJob.ErrorDescription)
+        WriteLog F1("Código de error:{0}", WMIJob.ErrorCode)
+        WriteLog F1("Descripción del error:{0}", WMIJob.ErrorDescription)
         WMIJobCompleted = FALSE
     END IF
     SET WMIJob = Nothing
@@ -885,8 +935,8 @@ END FUNCTION
 FUNCTION WriteLog(line)
     DIM fileStream
     
-    SET fileStream = fs.OpenTextFile(FicheroLog, 8, TRUE) 
-    '     8=ForAppending
+    SET fileStream = fs.OpenTextFile(FicheroLog, 8, True, -1) 
+    '     8=ForAppending, True=Crear si no existe, -1 = Unicode,
     WScript.Echo line
     fileStream.WriteLine line
     fileStream.Close
@@ -901,7 +951,7 @@ END FUNCTION
 SUB CrearLog()
  	DIM fileStream
     'Creamos el fichero de Log
-	Set fileStream = fs.CreateTextFile(FicheroLog, True)
+	Set fileStream = fs.CreateTextFile(FicheroLog, True, True)
 	fileStream.Close
 	Set fileStream = Nothing
 END SUB
@@ -924,7 +974,7 @@ FUNCTION F1(myString, arg0)
 END FUNCTION
 
 '--------------------------------------------------------------------------
-' calcular numero de copia
+' calcular número de copia
 '--------------------------------------------------------------------------
 FUNCTION NumeroCopia(cDirectorio)
 	DIM cFichero, i
@@ -945,7 +995,7 @@ FUNCTION NumeroCopia(cDirectorio)
 END FUNCTION
 
 '--------------------------------------------------------------------------
-' calcular numero de anterior
+' calcular número de anterior
 '--------------------------------------------------------------------------
 FUNCTION NumeroCopiaAnterior(nCopia)
     NumeroCopiaAnterior = nCopia - 1
@@ -960,7 +1010,7 @@ FUNCTION Enviar_Mail_CDO(Servidor_SMTP , _
 			De , _
 			Asunto , _
 			Mensaje , _
-			Http , _
+			Html , _
 			Path_Adjunto , _
 			Puerto , _
 			Usuario , _
@@ -971,8 +1021,10 @@ FUNCTION Enviar_Mail_CDO(Servidor_SMTP , _
     DIM Obj_Email 
           
     ' Crea un Nuevo objeto CDO.Message
-    SET Obj_Email = CREATEOBJECT ("cdo.Message")
+    SET Obj_Email = CreateObject ("cdo.Message")
     
+    Obj_Email.BodyPart.Charset = "utf-8" 
+
     ' Indica el servidor Smtp para poder enviar el Mail ( puede ser el nombre _
     '  del servidor o su direcci?n IP )
     Obj_Email.Configuration.Fields.Item ("http://schemas.microsoft.com/cdo/configuration/smtpserver") = Servidor_SMTP
@@ -982,32 +1034,27 @@ FUNCTION Enviar_Mail_CDO(Servidor_SMTP , _
     ' Puerto. Por defecto se usa el puerto 25, en el caso de Gmail se usan los puertos _
     '  465 o  el puerto 587 ( este ?ltimo me dio error )
     
-    Obj_Email.Configuration.Fields.Item _
-        ("http://schemas.microsoft.com/cdo/configuration/smtpserverport") = CLNG(Puerto)
+    Obj_Email.Configuration.Fields.Item ("http://schemas.microsoft.com/cdo/configuration/smtpserverport") = CLNG(Puerto)
     
     ' Indica el tipo de autentificaci?n con el servidor de correo _
     ' El valor 0 no requiere autentificarse, el valor 1 es con autentificaci?n
     Obj_Email.Configuration.Fields.Item("http://schemas.microsoft.com/cdo/configuration/smtpauthenticate") = ABS(Usar_Autentificacion)
     
         ' Tiempo m?ximo de espera en segundos para la conexi?n
-    Obj_Email.Configuration.Fields.Item _
-        ("http://schemas.microsoft.com/cdo/configuration/smtpconnectiontimeout") = 30
+    Obj_Email.Configuration.Fields.Item ("http://schemas.microsoft.com/cdo/configuration/smtpconnectiontimeout") = 30
 
     ' Configura las opciones para el login en el SMTP
     IF Usar_Autentificacion THEN
 
         ' Id de usuario del servidor Smtp ( en el caso de gmail, debe ser la direcci?n de correro _
         ' mas el @gmail.com )
-        Obj_Email.Configuration.Fields.Item _
-            ("http://schemas.microsoft.com/cdo/configuration/sendusername") = Usuario
+        Obj_Email.Configuration.Fields.Item ("http://schemas.microsoft.com/cdo/configuration/sendusername") = Usuario
 
         ' Password de la cuenta
-        Obj_Email.Configuration.Fields.Item _
-            ("http://schemas.microsoft.com/cdo/configuration/sendpassword") = Password
+        Obj_Email.Configuration.Fields.Item ("http://schemas.microsoft.com/cdo/configuration/sendpassword") = Password
 
         ' Indica si se usa SSL para el env?o. En el caso de Gmail requiere que est? en True
-        Obj_Email.Configuration.Fields.Item _
-            ("http://schemas.microsoft.com/cdo/configuration/smtpusessl") = Usar_SSL
+        Obj_Email.Configuration.Fields.Item ("http://schemas.microsoft.com/cdo/configuration/smtpusessl") = Usar_SSL
     
     END IF
     
@@ -1021,19 +1068,21 @@ FUNCTION Enviar_Mail_CDO(Servidor_SMTP , _
     Obj_Email.Subject = Asunto
     
     ' Cuerpo del mensaje
-    Obj_Email.TextBody = Mensaje
-    
-    'Ruta del archivo adjunto
-    
+    If Html Then 
+        Obj_Email.HTMLBody = Mensaje
+        Obj_Email.HTMLBodyPart.Charset = "utf-8"
+    Else
+        Obj_Email.TextBody = Mensaje
+    End If
+
+    'Ruta del archivo adjunto   
     IF Path_Adjunto <> vbNullString THEN
         Obj_Email.AddAttachment (Path_Adjunto)
     END IF
  
     ' Actualiza los datos antes de enviar
     Obj_Email.Configuration.Fields.Update
-    
-    'On Error Resume Next
-    
+      
     ' EnvIa el email
     Obj_Email.Send
 
@@ -1046,8 +1095,8 @@ FUNCTION Enviar_Mail_CDO(Servidor_SMTP , _
     END IF
     
     ' Descarga la referencia
-    IF Not Obj_Email Is NOTHING THEN
-        SET Obj_Email = NOTHING
+    IF Not Obj_Email Is Nothing THEN
+        SET Obj_Email = Nothing
     END IF
     
     ON ERROR GOTO 0
@@ -1058,11 +1107,11 @@ END FUNCTION
 '  APAGAR EL EQUIPO
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 Function ApagarWindows(tnAction)
- Dim loWmiService, laWmiInstance, loInstance, loInstanceWin
+    Dim loWmiService, laWmiInstance, loInstance, loInstanceWin
 
- Set loWmiService  = GetObject("winmgmts:{(Shutdown)}")
- Set laWmiInstance = loWmiService.InstancesOf("win32_operatingsystem")
- For Each loInstance In laWmiInstance
-  loInstance.win32shutdown(tnAction)
- Next
+    Set loWmiService  = GetObject("winmgmts:{(Shutdown)}")
+    Set laWmiInstance = loWmiService.InstancesOf("win32_operatingsystem")
+    For Each loInstance In laWmiInstance
+        loInstance.win32shutdown(tnAction)
+    Next
 End Function
