@@ -1,5 +1,5 @@
 '--------------------------------------------------------------------------
-' Eurotronic 2017 - CopiaTlmplus.vbs - ver. 4.7
+' Eurotronic 2017 - CopiaTlmplus.vbs - ver. 4.8
 ' -------------------------------------------------------------------------
 ' vbscript para copiar las bases Tlmplus a un directorio
 ' sintaxis:
@@ -23,7 +23,7 @@
 ' Se copian los ficheros <bdatos>.lg por si hubiera que revisarlo
 ' Se permite enviar el cuerpo del email en formato html
 ' Se habilita la codificación Unicode en la script y en el email
-' Se controla que la base de datos esté parada 
+' Se controla que todas las bases de datos estén paradas (4.8) 
 ' Se añade tarea de cálculo de costes
 ' Se añada copia adicional en carpeta "\N"
 '
@@ -87,7 +87,7 @@
 ' call %dlc%\bin\rfutil bases\tlmplus -C roll forward verbose -a bak\tlmplus.a2
 '
 ' arrancar la base de datos 
-' %dlc%\bin\dbman -start -db tlmplus
+' call %dlc%\bin\dbman -start -db tlmplus
 
 ' hacer un backup activando el AI
 ' call %dlc%\bin\probkup online bases\%1 %2\%1.bck enableai
@@ -102,12 +102,17 @@ DIM DirectoriosOrigen, BasesDeDatos, DirectorioTlmp, NumeroDeCopias, cFicheroCon
 DIM lEnViarEmail, ret, lHtml, lAutentificacion, lSSL, cFicheroControlNew, lCopiaEnCarpetaN 
 DIM cServidor, cParaEmail, cDeEmail, cAsunto, cMensaje, cAdjunto, FicheroLog, lRecalculosTLMPLUS
 DIM cPuerto, cPassword, cUsuario, FicheroControl, lNuevoLOG, nErrores, FicheroLogRC, DirectorioCarpetaN
+DIM BasesManenimiento, AppServerAgentes
 
-CONST COPYRIGTH = "(C) Eurotronic ver. 4.7"
+CONST COPYRIGTH = "(C) Eurotronic ver. 4.8"
 CONST SI = TRUE
 CONST NO = FALSE
-CONST TIEMPOESPERA = 6000
+CONST TIEMPOESPERA = 10000
 CONST OPCIONESR = " /COPY:DT /MIR /IT /NP /NFL /R:10 /W:1"
+
+' bases de datos y agentes AppServer a los que se les hace mantenimiento
+BasesManenimiento  = ARRAY( "tlmplus", "tlmplus1", "tlmplus2", "tlmbd-c",  "tlmbd-d", "tlmp-web", "tlmp-gmao" )
+AppServerAgentes   = ARRAY( "ZSSINBBDD", "ZSTlmp1", "ZSTlmp12", "ZSTlmp2", "tlmp-web", "App-SatE" ) 
 
 '--------------------------------------------------------------------------
 ' INDICAR LOS VALORES REQUERIDOS PARA LA COPIA
@@ -119,23 +124,24 @@ CONST OPCIONESR = " /COPY:DT /MIR /IT /NP /NFL /R:10 /W:1"
 ' Nota: NO PONER LOS CARACTERES \ NI * AL FINAL, SALVO EN EN CASO 3)
 '--------------------------------------------------------------------------
 
-DirectoriosOrigen  = ARRAY( "E:\TLMP\GESDOC", "E:\TLMP\FORMULARIOS" )
+DirectoriosOrigen  = ARRAY( "C:\TLMP\GESDOC" ) ' ARRAY( "E:\TLMP\GESDOC", "E:\TLMP\FORMULARIOS" )
 BasesDeDatos       = ARRAY( "tlmplus", "tlmplus1", "tlmplus2" ) ', "tlmp-web" )
 
-DirectorioTlmp     = "C:\TLMP" 
+
+DirectorioTlmp     = "C:\TLMP" '"E:\TLMP"
 NumeroDeCopias     = 4
 lCopiaEnCarpetaN   = SI 
 lEnviarEmail       = SI
 lRecalculosTLMPLUS = SI 
 
-cParaEmail         = "destino@eurotronic.es" 
-cAsunto            = "BASEDATOS: Copia Tlmplus finalizada" 
+cParaEmail         = "usuario@eurotronic.es" 
+cAsunto            = "EMPRESA: Copia Tlmplus finalizada" 
 
-cDeEmail           = "Copia bases Tlmplus <sos@eurotronic.es>"
-cServidor          = "smtp.eurotronic.es"
+cDeEmail           = "Copia bases Tlmplus <usuario@eurotronic.es>"
+cServidor          = "smtp.empresa.es"
 lHtml              = SI
 cPuerto            = 587
-cUsuario           = "sos@eurotronic.es"
+cUsuario           = "usuario@eurotronic.es"
 cPassword          = "********"
 lAutentificacion   = SI
 lSSL               = NO
@@ -232,28 +238,34 @@ SUB Main()
     AccionBases "stop"
     BorrarTMP
 
-    ' ---- borrar el contenido del directorio destino\ncopia\bases
-    fs.DeleteFile DirectorioNbases & "\*.*",TRUE
-    IF ERR.number <>0 THEN
-        CALL NERROR("ERROR: borrando el contendido de {0}", DestinoDirectorio)	
-        Salir nSalida, DestinoDirectorio & "\" & FicheroLogRC
-    END IF
-
-    ' --- copiar bases de datos
-    FOR I=0 TO UBOUND(BasesDeDatos)
-        ' --- backup
-        WriteLog "------------------------------"
-        WriteLog F2( "Backup base de datos: {0} a la carpeta destino: {1}", BasesDeDatos(I), DirectorioNbases  )
-        nReturn = BackupBaseDatos( BasesDeDatos(I), DirectorioNbases, DirectorioNbasesAnterior )
-        IF nReturn <> 0 THEN 
-            nErrores = nErrores + 1
-            WriteLog F2( "ERROR en BackupBaseDatos(): {0}, código de salida: {1}", BasesDeDatos(I), nReturn )
+    ' copiar bases si todas están paradas
+    IF ComprobarBasesParadas = 0 THEN
+        
+        ' ---- borrar el contenido del directorio destino\ncopia\bases
+        fs.DeleteFile DirectorioNbases & "\*.*",TRUE
+        IF ERR.number <>0 THEN
+            CALL NERROR("ERROR: borrando el contendido de {0}", DestinoDirectorio)	
+            Salir nSalida, DestinoDirectorio & "\" & FicheroLogRC
         END IF
-        WriteLog "------------------------------"
-    NEXT 
 
-    TruncarBi
-    TruncarLg
+        ' --- copiar bases de datos
+        FOR I=0 TO UBOUND(BasesDeDatos)
+            ' --- backup
+            WriteLog "------------------------------"
+            WriteLog F2( "Backup base de datos: {0} a la carpeta destino: {1}", BasesDeDatos(I), DirectorioNbases  )
+            nReturn = BackupBaseDatos( BasesDeDatos(I), DirectorioNbases, DirectorioNbasesAnterior )
+            IF nReturn <> 0 THEN 
+                nErrores = nErrores + 1
+                WriteLog F2( "ERROR en BackupBaseDatos(): {0}, código de salida: {1}", BasesDeDatos(I), nReturn )
+            END IF
+            WriteLog "------------------------------"
+        NEXT 
+
+        TruncarBi
+        TruncarLg
+    ELSE 
+        nErrores = nErrores + 1
+    END IF
 
     ' --- Iniciar Bases de datos
     AccionBases "start"
@@ -489,6 +501,25 @@ FUNCTION CopiarVaciarAILleno( BaseDatos, DirectorioDestinoAnterior )
 END FUNCTION
 
 '--------------------------------------------------------------------------
+' Comprobar si las bases de datos están paradas
+'--------------------------------------------------------------------------
+FUNCTION ComprobarBasesParadas()
+    Dim I, oShell, nReturn
+
+    SET oShell = WScript.CREATEOBJECT("Wscript.Shell")
+    ComprobarBasesParadas = 0 
+    FOR I=0 TO UBOUND(BasesDeDatos)
+        nReturn = oShell.Run( F2("{0}\dlc\bin\_proutil {0}\bases\{1} -C busy", DirectorioTlmp,  BasesDeDatos(I) ), 0, TRUE ) 
+        IF nReturn <> 0 THEN
+            WriteLog F1( "ERROR: La base de datos {0} no esta parada.", BasesDeDatos(I) )   
+            ComprobarBasesParadas = 1
+            EXIT FOR
+        END IF    
+    NEXT
+    SET oShell = Nothing
+END FUNCTION
+
+'--------------------------------------------------------------------------
 ' Copiar las carpeta al destino
 '--------------------------------------------------------------------------
 FUNCTION CopiaCarpetas(DestinoDirectorio, DirectorioNCopia)
@@ -644,7 +675,7 @@ END FUNCTION
 '--------------------------------------------------------------------------
 SUB BorrarTMP()
    ' 
-   DIM oShell, oEntornoUsuario
+   DIM oShell
 
    SET oShell = WScript.CREATEOBJECT("Wscript.Shell")
     
@@ -669,62 +700,66 @@ END SUB
 '--------------------------------------------------------------------------
 SUB AccionBases(cAccion)
    ' cAccion : "stop" - Parar, "start" - Iniciar
-   
-   DIM oShell, oEntornoUsuario
+   DIM I, oShell, nReturn
+   ' Respetar el orden indicado en https://knowledgebase.progress.com/articles/Article/P19023
 
    SET oShell = WScript.CREATEOBJECT("Wscript.Shell")
-   SET oEntornoUsuario = oShell.Environment("USER")
-   oEntornoUsuario("DLC") = DirectorioTlmp & "\dlc"
 
    WriteLog UCASE(cAccion) & " bases de datos"
    
-    ' -- parar bases y procesos
     If cAccion="stop" THEN
-        ' parar apps server
-        WriteLog "... parar apps server"
-        oShell.run DirectorioTlmp &"\dlc\bin\asbman -name tlmp-web -kill", 0
-        oShell.run DirectorioTlmp &"\dlc\bin\asbman -name App-Sat -kill", 0
-        oShell.run DirectorioTlmp &"\dlc\bin\asbman -name ZSSINBBDD -kill", 0
-        oShell.run DirectorioTlmp &"\dlc\bin\asbman -name ZSTlmp1 -kill", 0
-        oShell.run DirectorioTlmp &"\dlc\bin\asbman -name ZSTlmp12 -kill", 0
-        oShell.run DirectorioTlmp &"\dlc\bin\asbman -name ZSTlmp2 -kill", 0, True
+        ' 1 parar apps server
+        WriteLog "... parar AppServer"
+        FOR I=0 TO UBOUND(AppServerAgentes)
+            ' intentar la parada normal según https://knowledgebase.progress.com/articles/Article/P110644
+            nReturn = oShell.Run( F2( "{0}\dlc\bin\asbman -name {1} -stop", DirectorioTlmp,  AppServerAgentes(I) ), 0, TRUE ) 
+            IF nReturn <> 0 THEN
+                ' intentar la parada de emergencia (kill)
+                nReturn = oShell.Run( F2( "{0}\dlc\bin\asbman -name {1} -kill", DirectorioTlmp,  AppServerAgentes(I) ), 0, TRUE ) 
+                IF nReturn <> 0 THEN
+                    WriteLog F1( "ERROR: parando el agente AppServer {0}.", AppServerAgentes(I) ) 
+                END IF
+            END IF    
+        NEXT
 
-        oShell.run DirectorioTlmp &"\dlc\bin\dbman -" & cAccion & " -db tlmplus", 0
-        oShell.run DirectorioTlmp &"\dlc\bin\dbman -" & cAccion & " -db tlmplus1", 0
-        oShell.run DirectorioTlmp &"\dlc\bin\dbman -" & cAccion & " -db tlmplus2", 0
-        oShell.run DirectorioTlmp &"\dlc\bin\dbman -" & cAccion & " -db tlmp-web", 0
-        oShell.run DirectorioTlmp &"\dlc\bin\dbman -" & cAccion & " -db tlmp-gmao", 0
-        oShell.run DirectorioTlmp &"\dlc\bin\dbman -" & cAccion & " -db tlmbd-c", 0
-        oShell.run DirectorioTlmp &"\dlc\bin\dbman -" & cAccion & " -db tlmbd-d", 0, True
+        WScript.Sleep(TIEMPOESPERA*3) ' el tiempo de respuesta puede se excesivo
+       
+        ' 2 parar base datos
+        FOR I=0 TO UBOUND(BasesManenimiento)
+            nReturn = oShell.Run( F2( "{0}\dlc\bin\dbman -stop -db {1}", DirectorioTlmp,  BasesManenimiento(I) ), 0, TRUE ) 
+            IF nReturn <> 0 THEN
+                WriteLog F1( "ERROR: parando la base de datos {0}.", BasesManenimiento(I) )   
+            END IF    
+        NEXT
 
         ' eliminar procesos java.exe
         'WriteLog "... eliminar procesos java.exe"
         'oShell.run "taskkill.exe /F /IM java.exe", 0, True
     End If
 
-    ' -- arrancar bases y procesos  
     If cAccion="start" THEN
+        WriteLog "... arrancar AppServer"
+        ' 1 arrancar bases de datos
+        FOR I=0 TO UBOUND(BasesManenimiento)
+            nReturn = oShell.Run( F2( "{0}\dlc\bin\dbman -start -db {1}", DirectorioTlmp,  BasesManenimiento(I) ), 0, TRUE ) 
+            IF nReturn <> 0 THEN
+                WriteLog F1( "ERROR: arrancando la base de datos {0}.", BasesManenimiento(I) )   
+            END IF    
+        NEXT
+    
+        WScript.Sleep(TIEMPOESPERA*3)
 
-        oShell.run DirectorioTlmp &"\dlc\bin\dbman -" & cAccion & " -db tlmplus", 0
-        oShell.run DirectorioTlmp &"\dlc\bin\dbman -" & cAccion & " -db tlmplus1", 0
-        oShell.run DirectorioTlmp &"\dlc\bin\dbman -" & cAccion & " -db tlmplus2", 0
-        oShell.run DirectorioTlmp &"\dlc\bin\dbman -" & cAccion & " -db tlmp-web", 0
-        oShell.run DirectorioTlmp &"\dlc\bin\dbman -" & cAccion & " -db tlmp-gmao", 0
-        oShell.run DirectorioTlmp &"\dlc\bin\dbman -" & cAccion & " -db tlmbd-c", 0
-        oShell.run DirectorioTlmp &"\dlc\bin\dbman -" & cAccion & " -db tlmbd-d", 0, True
+        ' 2 arrancar appserver
+        FOR I=0 TO UBOUND(AppServerAgentes)
+            nReturn = oShell.Run( F2( "{0}\dlc\bin\asbman -name {1} -start", DirectorioTlmp,  AppServerAgentes(I) ), 0, TRUE ) 
+            IF nReturn <> 0 THEN
+                WriteLog F1( "ERROR: parando el agente AppServer {0}.", AppServerAgentes(I) )   
+            END IF    
+        NEXT
 
-        ' arrancar apps server
-        WriteLog "... arrancar apps server"
-        oShell.run DirectorioTlmp &"\dlc\bin\asbman -name tlmp-web -start", 0
-        oShell.run DirectorioTlmp &"\dlc\bin\asbman -name App-Sat -start", 0
-        oShell.run DirectorioTlmp &"\dlc\bin\asbman -name ZSSINBBDD -start", 0
-        oShell.run DirectorioTlmp &"\dlc\bin\asbman -name ZSTlmp1 -start", 0
-        oShell.run DirectorioTlmp &"\dlc\bin\asbman -name ZSTlmp12 -start", 0
-        oShell.run DirectorioTlmp &"\dlc\bin\asbman -name ZSTlmp2 -start", 0, True
     End If
 
    SET oShell = Nothing
-   SET oEntornoUsuario =  Nothing
    
    WScript.Sleep(TIEMPOESPERA)
    
@@ -754,54 +789,42 @@ End SUB
 '  Truncar bi bases tlmplus
 '--------------------------------------------------------------------------
 SUB TruncarBi()
-   ' 
-   DIM oShell, oEntornoUsuario
+    DIM I, oShell, nReturn
 
-   SET oShell = WScript.CREATEOBJECT("Wscript.Shell")
-   SET oEntornoUsuario = oShell.Environment("USER")
-   oEntornoUsuario("DLC") = DirectorioTlmp & "\dlc"
+    SET oShell = WScript.CREATEOBJECT("Wscript.Shell")
 
-   WriteLog "Truncar los ficheros BI."
-   'call            c:\tlmp           \DLC\bin\proutil        c:\tlmp    \bases\tlmplus  -C truncate bi , MINIMIZADO
-   oShell.run DirectorioTlmp & "\dlc\bin\proutil " & DirectorioTlmp  & "\bases\tlmplus  -C truncate bi", 0
-   oShell.run DirectorioTlmp & "\dlc\bin\proutil " & DirectorioTlmp  & "\bases\tlmplus1 -C truncate bi", 0
-   oShell.run DirectorioTlmp & "\dlc\bin\proutil " & DirectorioTlmp  & "\bases\tlmplus2 -C truncate bi", 0
-   oShell.run DirectorioTlmp & "\dlc\bin\proutil " & DirectorioTlmp  & "\bases\tlmbd-c  -C truncate bi", 0
-   oShell.run DirectorioTlmp & "\dlc\bin\proutil " & DirectorioTlmp  & "\bases\tlmbd-d  -C truncate bi", 0
-   oShell.run DirectorioTlmp & "\dlc\bin\proutil " & DirectorioTlmp  & "\bases\tlmp-web -C truncate bi", 0
-   oShell.run DirectorioTlmp & "\dlc\bin\proutil " & DirectorioTlmp  & "\bases\tlmp-gmao -C truncate bi", 0
+    WriteLog "Truncar los ficheros BI."
+    FOR I=0 TO UBOUND(BasesManenimiento)
+        nReturn = oShell.Run( F2("{0}\dlc\bin\_proutil {0}\bases\{1} -C truncate bi", DirectorioTlmp,  BasesManenimiento(I) ), 0, TRUE ) 
+        IF nReturn <> 0 THEN
+            WriteLog F1( "ERROR: Truncando el fichero BI de {0}.", BasesManenimiento(I) )   
+        END IF    
+    NEXT
 
-   SET oShell = Nothing
-   SET oEntornoUsuario =  Nothing
-   WScript.Sleep(TIEMPOESPERA)
-   
+    WScript.Sleep(TIEMPOESPERA)
+    SET oShell = Nothing
+
 END SUB
 
 '--------------------------------------------------------------------------
 '  Truncar lg bases tlmplus
 '--------------------------------------------------------------------------
 SUB TruncarLg()
-   ' 
-   DIM oShell, oEntornoUsuario
+   DIM I, oShell, nReturn
 
    SET oShell = WScript.CREATEOBJECT("Wscript.Shell")
-   SET oEntornoUsuario = oShell.Environment("USER")
-   oEntornoUsuario("DLC") = DirectorioTlmp & "\dlc"
 
-   WriteLog "Truncar los ficheros LG."   
-   'call            c:\tlmp     \DLC\bin\_dbutil prolog     c:\tlmp            \bases\tlmplus   
-   oShell.run DirectorioTlmp & "\dlc\bin\_dbutil prolog " & DirectorioTlmp  & "\bases\tlmplus", 0	
-   oShell.run DirectorioTlmp & "\dlc\bin\_dbutil prolog " & DirectorioTlmp  & "\bases\tlmplus1", 0
-   oShell.run DirectorioTlmp & "\dlc\bin\_dbutil prolog " & DirectorioTlmp  & "\bases\tlmplus2", 0
-   oShell.run DirectorioTlmp & "\dlc\bin\_dbutil prolog " & DirectorioTlmp  & "\bases\tlmbd-c", 0
-   oShell.run DirectorioTlmp & "\dlc\bin\_dbutil prolog " & DirectorioTlmp  & "\bases\tlmbd-d", 0
-   oShell.run DirectorioTlmp & "\dlc\bin\_dbutil prolog " & DirectorioTlmp  & "\bases\tlmp-web", 0
-   oShell.run DirectorioTlmp & "\dlc\bin\_dbutil prolog " & DirectorioTlmp  & "\bases\tlmp-gmao", 0
+    WriteLog "Truncar los ficheros LG." 
+    FOR I=0 TO UBOUND(BasesManenimiento)
+        nReturn = oShell.Run( F2("{0}\dlc\bin\_dbutil prolog {0}\bases\{1}", DirectorioTlmp,  BasesManenimiento(I) ), 0, TRUE ) 
+        'IF nReturn <> 0 THEN ' !! SE DESACTIVA YA QUE SIEMPRE DEVUELVE ERRORLEVEL=2
+        '    WriteLog F1( "ERROR: Truncando el fichero LG de {0}.", BasesManenimiento(I) )   
+        'END IF    
+    NEXT
+    
+    WScript.Sleep(TIEMPOESPERA)
+    SET oShell = Nothing
 
-   SET oShell = Nothing
-   SET oEntornoUsuario =  Nothing
-   WScript.Sleep(TIEMPOESPERA)
-   
 END SUB
 
 '--------------------------------------------------------------------------
