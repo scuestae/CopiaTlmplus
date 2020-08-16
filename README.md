@@ -1,6 +1,7 @@
 # Scripts desarrolladas para Tlmplus y GO!Manage
 
 CopiaGO!Manage.vbs
+  
   Script que además de copiar las bases de datos de GO!Manage realiza las siguientes tareas:
   - Mantiene un númerode copias que se van rotando.
   - Se puede establecer una copi adicional para sincronizar on la nube.
